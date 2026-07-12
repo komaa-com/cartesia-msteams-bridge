@@ -13,8 +13,9 @@ import type { Logger } from "./log.js";
  * `Authorization: Bearer <access token>` and a `Cartesia-Version` header,
  * then sends a `start` event ({config: {input_format}, agent overrides,
  * metadata}). The server acks with `ack` (echoing the config); media flows as
- * `media_input` / `media_output` events with base64 payloads - agent audio
- * comes back IN THE SAME FORMAT as config.input_format, so pinning
+ * `media_input` / `media_output` events with base64 payloads - the stream has
+ * a single format config, and agent audio comes back in it (implied by the
+ * docs' own quick start, tripwired at runtime; see INPUT_FORMAT). Pinning
  * `pcm_16000` (the StandIn wire rate) makes the hot path copy-only in the
  * strongest sense: the base64 payload string is relayed verbatim, no decode,
  * no re-encode, no transcoding. `clear` tells the client to flush its
@@ -32,7 +33,14 @@ import type { Logger } from "./log.js";
 /** The one wire rate: StandIn PCM 16 kHz mono = Line `pcm_16000`. */
 export const WIRE_SAMPLE_RATE = 16_000;
 
-/** Line audio format matching the StandIn wire (agent audio returns in the same format). */
+/**
+ * Line audio format matching the StandIn wire. The stream has ONE format
+ * config: the docs' own quick start plays media_output straight back against
+ * it, but they stop short of stating "output == input_format" in writing - so
+ * the session logs the first agent frame's byte length (and warns on 16-bit
+ * misalignment) to make a format mismatch visible on the first live call
+ * instead of silently relaying garbage.
+ */
 export const INPUT_FORMAT = "pcm_16000";
 
 /** Protocol-level ping cadence: the server drops idle connections after ~180 s. */
@@ -113,8 +121,7 @@ export interface StartOptions {
 
 /**
  * The `start` event sent once, first message on the socket. Audio is pinned to
- * pcm_16000 (the StandIn wire rate; agent audio returns in the same format -
- * copy-only relay). Caller context ALWAYS rides `metadata` (the Line agent
+ * pcm_16000 (the StandIn wire rate - copy-only relay). Caller context ALWAYS rides `metadata` (the Line agent
  * code receives it); it is additionally appended to the system prompt only
  * when the operator overrides the prompt via CARTESIA_SYSTEM_PROMPT.
  */
@@ -197,10 +204,13 @@ export async function synthesizeGoodbye(cfg: BridgeConfig, text: string): Promis
   // Time-bound the synth: the governor's hard teardown deadline is armed before
   // this is awaited, but a fetch that hangs forever would still hold the promise
   // (and the mute latch) open.
+  // Same auth form as the token mint (Authorization: Bearer) - a mixed
+  // x-api-key/Bearer split would fail HALF the surface if the legacy header
+  // form is ever dropped, which is a confusing partial outage.
   const res = await fetch(`https://${cfg.apiHost}/tts/bytes`, {
     method: "POST",
     headers: {
-      "x-api-key": cfg.cartesiaApiKey,
+      authorization: `Bearer ${cfg.cartesiaApiKey}`,
       "cartesia-version": cfg.cartesiaVersion,
       "content-type": "application/json",
     },

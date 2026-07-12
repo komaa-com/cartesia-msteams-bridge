@@ -136,6 +136,22 @@ function remoteKey(req: IncomingMessage, trustProxy: boolean): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+/**
+ * What startServer returns: the http.Server, plus a graceful drain for
+ * embedders. handleSignals is CLI-only (it exits the process); a library host
+ * calls `await server.drain()` on its own shutdown path instead - closing the
+ * raw server without draining would hard-cut every live call.
+ */
+export interface BridgeServer extends Server {
+  /**
+   * End every live call gracefully (session.end + close both sockets), letting
+   * a goodbye already in progress finish, and resolve once all sessions have
+   * torn down (bounded by the worst-case goodbye deadline). Does NOT stop the
+   * listener and never exits the process - follow with server.close().
+   */
+  drain(reason?: string): Promise<void>;
+}
+
 /** Options for startServer beyond the env-driven config. */
 export interface StartServerOptions {
   /**
@@ -150,8 +166,8 @@ export interface StartServerOptions {
 // SIGTERM/SIGINT drain: on shutdown, gracefully end every live call (notify the
 // worker with session.end + close both sockets) instead of hard-dropping calls
 // on a redeploy. OPT-IN (CLI only): exits the process when done. Wired exactly
-// once per process (process.once) so repeated startServer calls (tests) never
-// accumulate listeners.
+// once per process (the signalsWired guard below; process.on, NOT process.once,
+// because a SECOND signal during the drain must be seen and exit immediately).
 const liveRegistries = new Set<Map<string, CallSession>>();
 let signalsWired = false;
 let draining = false;
@@ -208,7 +224,7 @@ export function startServer(
   cfg: BridgeConfig,
   connectLine?: LineConnector,
   options?: StartServerOptions,
-): ReturnType<typeof createServer> {
+): BridgeServer {
   const maxConnections = cfg.maxConnections > 0 ? cfg.maxConnections : DEFAULT_MAX_CONNECTIONS;
   // Per-IP cap defaults to the TOTAL cap (i.e. effectively off) rather than a low
   // fixed number: the bridge's only legitimate client is StandIn, which dials from
@@ -373,11 +389,33 @@ export function startServer(
 
   httpServer.on("close", () => liveRegistries.delete(sessions));
 
+  const bridge = httpServer as BridgeServer;
+  bridge.drain = async (reason = "bridge-shutdown"): Promise<void> => {
+    const live = [...sessions.values()];
+    for (const s of live) {
+      try {
+        s.shutdown(reason); // defers to an in-progress goodbye (its backstop tears down)
+      } catch {
+        /* keep draining the rest */
+      }
+    }
+    if (live.length === 0) {
+      return;
+    }
+    const deadline = Date.now() + Math.max(SHUTDOWN_GRACE_MS, cfg.goodbyeGraceMs + 8_000 + 500);
+    while ([...sessions.values()].some((s) => !s.isClosed) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // teardown queues session.end + close handshakes asynchronously; give them
+    // a short window to flush before the caller stops the listener.
+    await new Promise((r) => setTimeout(r, 100));
+  };
+
   httpServer.listen(cfg.port, cfg.host, () => {
     log.info(
       `cartesia-msteams-bridge listening on ${cfg.host}:${cfg.port} ` +
         `(Line agent ${cfg.agentId}, host ${cfg.apiHost})`,
     );
   });
-  return httpServer;
+  return bridge;
 }

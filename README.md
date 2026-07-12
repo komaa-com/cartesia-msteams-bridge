@@ -25,6 +25,8 @@ Cartesia Line agent         (your agent code on Cartesia's platform)
 
 The hot path is **copy-only in the strongest sense**: the StandIn wire is base64 PCM 16 kHz mono, the Line stream is pinned to `pcm_16000`, and agent audio returns in the same format - so the base64 payload string is relayed **verbatim** in both directions. No decode, no re-encode, no resampling, no transcoding.
 
+> **One wire assumption to verify on your first call.** Cartesia's docs give the stream a single format config and their own quick start plays `media_output` straight back against it, but they stop short of stating "output equals `input_format`" in writing. The bridge logs the first agent frame's byte length (and warns if it cannot be 16-bit PCM) precisely so a format surprise is visible in the logs on your first live call instead of silently reaching the caller as noise. If your first call sounds wrong, that log line is the place to look.
+
 ## Where the brain lives (read this first)
 
 A Line agent is **your code deployed on Cartesia's platform**: the LLM, the tools, the conversation logic, the hangup decision - all of it runs there, configured with Cartesia's SDK, not by this bridge. That makes this bridge deliberately a **transport**, and different from its siblings in two ways:
@@ -86,6 +88,8 @@ Or keep them in a `.env` file (copy [`.env.example`](./.env.example), which ship
 node --env-file=.env node_modules/.bin/cartesia-msteams-bridge
 ```
 
+(The CLI reads `process.env` only - there is no automatic `.env` loading, so use `--env-file` or your process manager's env handling.)
+
 ### 2. As a library
 
 ```ts
@@ -99,6 +103,15 @@ Signal handling is opt-in for embedders: the built-in SIGTERM/SIGINT drain ends 
 
 ```ts
 startServer(loadConfig(), undefined, { handleSignals: true });
+```
+
+When the bridge is embedded in a larger service, wire your own shutdown path to the returned handle instead - `drain()` ends every live call gracefully (waiting for an in-progress goodbye) without stopping the listener or exiting:
+
+```ts
+const server = startServer(loadConfig());
+// on your shutdown path:
+await server.drain();
+server.close();
 ```
 
 ### 3. Connect it to StandIn
@@ -142,7 +155,9 @@ Everything below arrives in your agent code through Cartesia's platform, exactly
 { "type": "goodbye_request", "text": "I'm sorry, we've reached the time limit for this call. Goodbye!" }
 ```
 
-Handle it by speaking the text; the bridge ends the call after the grace window either way. DTMF arrives as native Line `dtmf` events, and `transfer_call` from your agent is logged and ignored (there is no phone number to transfer a Teams call to).
+Handle it by speaking the text; the bridge ends the call after the grace window either way. On the ack the bridge also sends one `call_context` snapshot (participant count + recording state at stream start), so state that changed before the stream was ready is never lost.
+
+**Known limitation:** `transfer_call` from your agent is logged and **ignored**. There is no phone number to transfer a Teams call to, and the StandIn wire currently has no Teams-side transfer/escalation capability - if your Line agent offers transfers, disable that path for calls arriving with `metadata.from == "msteams"`. DTMF arrives as native Line `dtmf` events.
 
 ## Configuration
 

@@ -81,6 +81,9 @@ export interface AssistantCancelMessage {
   turnId: number;
 }
 
+/** Reserved wire types: part of the shared StandIn contract (the sibling
+ *  bridges emit them via their tool channels), but NEVER sent by this bridge -
+ *  the Line wire has no client-side tool channel to drive them from. */
 export interface ExpressionMessage {
   type: "expression";
   emotion: string;

@@ -54,6 +54,12 @@ export function metricObserve(name: keyof typeof HISTOGRAMS, value: number): voi
 }
 
 export function metricDec(name: keyof typeof META): void {
+  if (META[name]?.type === "gauge") {
+    // A double-decrement bug must not drive a gauge negative (Prometheus
+    // would read it as a counter reset and ops would chase a ghost).
+    counts.set(name, Math.max(0, (counts.get(name) ?? 0) - 1));
+    return;
+  }
   metricInc(name, -1);
 }
 

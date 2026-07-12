@@ -172,11 +172,23 @@ test("start is sent on session.start; caller audio buffers until ack, then flush
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(fakeAgent.sent.filter((m) => m.event === "media_input").length, 0, "no audio before ack");
 
+  // junk audio.frame (no payload) must not become media:{payload:undefined}
+  ws.send(JSON.stringify({ type: "audio.frame", seq: 99, timestampMs: 0 }));
+
   // ack -> buffered frames flush oldest-first, verbatim
   fakeAgent.emit({ event: "ack", stream_id: "s" });
   await until(() => (fakeAgent.sent.filter((m) => m.event === "media_input").length === 2 ? true : undefined));
   const flushed = fakeAgent.sent.filter((m) => m.event === "media_input").map((m) => m.audio);
   assert.deepEqual(flushed, [b64("one"), b64("two")]);
+
+  // the ack also emits an initial-context snapshot (state that landed pre-ack
+  // or in session.start must not be lost to the agent code)
+  const snapshot = fakeAgent.sent.find(
+    (m) => m.event === "custom" && (m.metadata as Record<string, unknown>).type === "call_context",
+  );
+  assert.ok(snapshot, "initial call_context snapshot after ack");
+  assert.equal((snapshot!.metadata as Record<string, unknown>).participantCount, 1);
+  assert.equal((snapshot!.metadata as Record<string, unknown>).recordingStatus, "unknown");
 
   // post-ack audio flows directly
   ws.send(JSON.stringify({ type: "audio.frame", seq: 2, timestampMs: 40, payloadBase64: b64("three") }));
@@ -204,6 +216,7 @@ test("start is sent on session.start; caller audio buffers until ack, then flush
 
   // participants -> call_context custom event
   ws.send(JSON.stringify({ type: "participants", count: 3 }));
+  ws.send(JSON.stringify({ type: "participants" })); // junk: no count - dropped
   const ctx = await until(() =>
     fakeAgent.sent.find((m) => m.event === "custom" && (m.metadata as Record<string, unknown>).participantCount === 3),
   );
@@ -412,4 +425,30 @@ test("agent socket close ends the call cleanly", async () => {
   fake.handlers.onClose(1000, "agent hung up");
   const end = await until(() => received.find((m) => m.type === "session.end"));
   assert.equal(end.reason, "agent-disconnected");
+});
+
+
+test("embedder drain: server.drain() ends live calls gracefully without exiting", async () => {
+  const fake = new FakeAgent();
+  const s = startServer({ ...cfg }, makeConnector(fake));
+  await new Promise<void>((r) => s.once("listening", () => r()));
+  const p = (s.address() as AddressInfo).port;
+  after(() => s.close());
+
+  const callId = "call-drain-1";
+  const ws = await connectWorker(p, callId);
+  const received: Array<Record<string, unknown>> = [];
+  ws.on("message", (d) => received.push(JSON.parse(d.toString())));
+  ws.send(JSON.stringify({ type: "session.start", callId, threadId: "t", caller: {} }));
+  await until(() => fake.sent.find((m) => m.event === "start"));
+  fake.emit({ event: "ack" });
+
+  await s.drain("bridge-shutdown");
+  const end = received.find((m) => m.type === "session.end");
+  assert.ok(end, "worker told the call is ending");
+  assert.equal(end!.reason, "bridge-shutdown");
+  assert.equal(fake.closed, true, "agent stream closed");
+  // no process.exit involved: the listener is still up until the embedder closes it
+  const ws2 = await connectWorker(p, "call-drain-2");
+  ws2.close();
 });

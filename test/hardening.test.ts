@@ -125,3 +125,27 @@ test("loadConfig throws on a negative MAX_CALL_MINUTES", () => {
     process.env = saved;
   }
 });
+
+// HMAC_FRESHNESS_MS=0 passes the non-negative check but would reject every
+// upgrade AND disable replay protection - a misconfig that must fail loud.
+test("loadConfig throws on HMAC_FRESHNESS_MS=0", () => {
+  const saved = { ...process.env };
+  try {
+    process.env.WORKER_SHARED_SECRET = "s";
+    process.env.CARTESIA_API_KEY = "k";
+    process.env.CARTESIA_AGENT_ID = "a";
+    process.env.HMAC_FRESHNESS_MS = "0";
+    assert.throws(() => loadConfig(), /HMAC_FRESHNESS_MS must be positive/);
+  } finally {
+    process.env = saved;
+  }
+});
+
+// A double-decrement must not drive a gauge negative (Prometheus reads a
+// negative gauge dip as a counter reset).
+test("metricDec clamps gauges at zero", async () => {
+  const { metricDec, renderMetrics } = await import("../src/metrics.js");
+  metricDec("bridge_calls_active");
+  metricDec("bridge_calls_active");
+  assert.match(renderMetrics(), /bridge_calls_active 0\n/);
+});

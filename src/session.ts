@@ -106,6 +106,9 @@ export class CallSession {
 
   // Teams recording state, forwarded to the agent code as a custom event
   private recordingActive = false;
+  private recordingStatus = "unknown";
+  // first agent frame: sanity-log the byte length (output-format tripwire)
+  private firstAgentFrameSeen = false;
 
   // bridge-side call governor
   private governorTimer: NodeJS.Timeout | null = null;
@@ -190,6 +193,9 @@ export class CallSession {
         // media_input untouched). Until the server acks the start event,
         // buffer (bounded) instead of sending - the ack confirms the stream
         // and the pcm_16000 config, and this window also covers the connect.
+        if (typeof msg.payloadBase64 !== "string" || !msg.payloadBase64) {
+          break; // junk on the wire must not become media:{payload:undefined}
+        }
         if (this.line && this.acked) {
           this.line.sendAudioChunk(msg.payloadBase64);
           metricInc("bridge_frames_to_agent_total");
@@ -205,6 +211,9 @@ export class CallSession {
         this.sendToWorker({ type: "pong", ts: msg.ts });
         break;
       case "participants":
+        if (typeof msg.count !== "number") {
+          break;
+        }
         this.participantCount = msg.count;
         this.pushContext({
           note:
@@ -216,12 +225,13 @@ export class CallSession {
         break;
       case "dtmf":
         // Native on the Line wire - no prompt-note workaround needed.
-        if (this.line && this.acked) {
+        if (this.line && this.acked && typeof msg.digit === "string" && msg.digit) {
           this.line.sendDtmf(msg.digit);
         }
         break;
       case "recording.status":
         this.recordingActive = msg.status === "active";
+        this.recordingStatus = msg.status;
         this.log.info(`recording.status = ${msg.status}`);
         this.pushContext({ note: `Teams recording is now ${msg.status}.`, recordingStatus: msg.status });
         break;
@@ -263,6 +273,7 @@ export class CallSession {
     }
     this.log.info(`session.start (direction=${msg.direction ?? "inbound"}, recording=${msg.recordingStatus ?? "unknown"})`);
     this.recordingActive = msg.recordingStatus === "active";
+    this.recordingStatus = msg.recordingStatus ?? "unknown";
     // Per-call personalization: caller context rides the start metadata (and
     // the prompt override, when configured). CallerInfo fields are all
     // nullable - default, never send null.
@@ -370,7 +381,10 @@ export class CallSession {
     if (this.goodbyeTimer) {
       clearTimeout(this.goodbyeTimer);
     }
-    this.goodbyeTimer = setTimeout(() => this.endCall("time-limit"), graceMs + 500);
+    // Flush-aware: playedMs measures AUDIO duration, but the frames sit in the
+    // worker socket's send buffer - under backpressure the close could race
+    // the still-draining goodbye. Bounded, so the deadline stays hard.
+    this.goodbyeTimer = setTimeout(() => this.endCallAfterFlush("time-limit"), graceMs + 500);
     this.goodbyeTimer.unref?.();
   }
 
@@ -412,6 +426,18 @@ export class CallSession {
 
   /** Agent audio (base64 pcm_16000 from media_output): mute filter, then relay verbatim. */
   private onLineAudio(base64Pcm: string): void {
+    if (!this.firstAgentFrameSeen) {
+      // Output-format tripwire: the Line docs imply (but do not state) that
+      // media_output mirrors config.input_format. An odd byte length cannot be
+      // 16-bit PCM at all; the length log makes a rate mismatch diagnosable on
+      // the first live call instead of shipping silent garbage to Teams.
+      this.firstAgentFrameSeen = true;
+      const bytes = Buffer.byteLength(base64Pcm, "base64");
+      this.log.info(`first agent audio frame: ${bytes} bytes (${pcm16kBytesToMs(bytes)}ms if pcm_16000)`);
+      if (bytes % 2 !== 0) {
+        this.log.warn("first agent frame has an ODD byte length - this is not 16-bit PCM; check the agent's output format");
+      }
+    }
     if (this.muteAgentAudio) {
       this.log.debug("dropping agent audio (deterministic goodbye playing)");
       return;
@@ -446,6 +472,16 @@ export class CallSession {
           }
         }
         this.pendingAudio = [];
+        // Initial-context snapshot: participants/recording can land BEFORE the
+        // ack (pushContext drops pre-ack events by design), and the initial
+        // recording state arrives in session.start - without this the agent
+        // code would never learn the state the call started in.
+        this.line?.sendCustom({
+          type: "call_context",
+          note: "Call context snapshot at stream start.",
+          participantCount: this.participantCount,
+          recordingStatus: this.recordingStatus,
+        });
         this.log.info("ack received; relaying");
         break;
       }
@@ -596,6 +632,26 @@ export class CallSession {
   /** Whether this session is still open (the server's drain polls this). */
   get isClosed(): boolean {
     return this.closed;
+  }
+
+  /**
+   * endCall once the worker socket's send buffer has drained (bounded): used
+   * by the soft goodbye deadline so queued goodbye frames are not cut off by
+   * the close handshake. The hard backstops call endCall directly.
+   */
+  private endCallAfterFlush(reason: string, maxWaitMs = 2000): void {
+    const deadline = Date.now() + maxWaitMs;
+    const tick = (): void => {
+      if (this.closed) {
+        return;
+      }
+      if (this.worker.bufferedAmount === 0 || Date.now() > deadline) {
+        this.endCall(reason);
+        return;
+      }
+      setTimeout(tick, 50).unref?.();
+    };
+    tick();
   }
 
   /** Ask the worker to tear the call down, then close both sockets. */

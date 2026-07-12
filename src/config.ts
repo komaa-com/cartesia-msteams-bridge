@@ -156,6 +156,11 @@ export function loadConfig(): BridgeConfig {
     tlsCertPath: optional("TLS_CERT_PATH"),
     tlsKeyPath: optional("TLS_KEY_PATH"),
   };
+  // HMAC_FRESHNESS_MS=0 passes the non-negative check but would make every
+  // timestamp stale AND zero out the replay window - a misconfig, never intent.
+  if (cfg.hmacFreshnessMs === 0) {
+    throw new Error("HMAC_FRESHNESS_MS must be positive (0 would reject every upgrade and disable replay protection)");
+  }
   // The Line wire has no injection message, so without a TTS config the
   // governor goodbye is best-effort (a goodbye_request custom event the agent
   // code may or may not handle). Not an error - but the operator should know

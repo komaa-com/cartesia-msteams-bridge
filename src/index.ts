@@ -9,7 +9,7 @@
  */
 
 export { loadConfig, type BridgeConfig } from "./config.js";
-export { startServer, authorizeUpgrade, callIdFromUrl, ReplayGuard, type StartServerOptions } from "./server.js";
+export { startServer, authorizeUpgrade, callIdFromUrl, ReplayGuard, type StartServerOptions, type BridgeServer } from "./server.js";
 export { CallSession } from "./session.js";
 export { renderMetrics } from "./metrics.js";
 export {
