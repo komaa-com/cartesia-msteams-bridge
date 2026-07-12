@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/komaa-com/cartesia-msteams-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/komaa-com/cartesia-msteams-bridge/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@komaa/cartesia-msteams-bridge.svg)](https://www.npmjs.com/package/@komaa/cartesia-msteams-bridge)
+[![docs](https://img.shields.io/badge/docs-komaa--com.github.io-2563eb.svg)](https://komaa-com.github.io/cartesia-msteams-bridge/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg)](https://www.typescriptlang.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
@@ -222,11 +223,13 @@ src/
   hmac.ts        HMAC-SHA256("{timestampMs}.{callId}") hex, constant-time verify
   config.ts      env config (fail-loud numeric parsing, host allowlist)
 examples/        runnable example project
+website/         docs site (Astro Starlight), deployed to GitHub Pages
 test/            node:test suites (run with tsx; no Cartesia account needed)
 ```
 
 ## Documentation
 
+- **Docs site:** [komaa-com.github.io/cartesia-msteams-bridge](https://komaa-com.github.io/cartesia-msteams-bridge/) - getting started, what your Line agent receives, architecture, configuration and library API reference, wire protocol, troubleshooting.
 - **Example project:** [`examples/basic-bridge/`](./examples/basic-bridge/) - a runnable embedding.
 - **StandIn (the hosted service):** [standin.komaa.com](https://standin.komaa.com) · [docs.komaa.com](https://docs.komaa.com).
 - **Cartesia Line:** [docs.cartesia.ai/line](https://docs.cartesia.ai/line) - deploying agents, the WebSocket API this bridge speaks.
