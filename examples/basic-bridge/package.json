@@ -1,0 +1,16 @@
+{
+  "name": "basic-bridge-example",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Runnable example: embed @komaa/cartesia-msteams-bridge and put a Line agent on Teams calls.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env index.mjs"
+  },
+  "dependencies": {
+    "@komaa/cartesia-msteams-bridge": "file:../.."
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

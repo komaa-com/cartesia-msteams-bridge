@@ -1,0 +1,45 @@
+name: Publish to npm
+
+# Publishes @komaa/cartesia-msteams-bridge when you push a version tag (e.g. `v0.1.0`)
+# or publish a GitHub Release. prepublishOnly runs typecheck + tests + build, so what
+# ships is always freshly built from the tagged source.
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # enables npm provenance (supply-chain attestation); needs a public repo
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+
+      - run: npm ci
+
+      # Safety: on a tag push, the tag must equal the package.json version (e.g. tag v0.1.0 == "0.1.0").
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
+      # publishConfig.access=public is set; prepublishOnly runs typecheck + tests + build.
+      - name: Publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

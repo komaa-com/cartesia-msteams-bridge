@@ -1,0 +1,71 @@
+{
+  "name": "@komaa/cartesia-msteams-bridge",
+  "version": "0.1.0",
+  "description": "Put a Cartesia Line voice agent on Microsoft Teams calls. Terminates the StandIn media bridge wire protocol on one side and the Cartesia Line agent WebSocket on the other. No transcoding: the base64 PCM 16k payload is relayed verbatim both ways, barge-in via clear, native DTMF, live-context custom events, call governors with a Sonic TTS goodbye.",
+  "keywords": [
+    "cartesia",
+    "line",
+    "sonic",
+    "voice-agent",
+    "microsoft-teams",
+    "voice",
+    "agent",
+    "websocket",
+    "bridge",
+    "telephony",
+    "speech-to-speech",
+    "conversational-ai"
+  ],
+  "license": "MIT",
+  "author": "Alaaeldin Elhenawy <alaamh@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/komaa-com/cartesia-msteams-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/komaa-com/cartesia-msteams-bridge/issues"
+  },
+  "homepage": "https://github.com/komaa-com/cartesia-msteams-bridge#readme",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "cartesia-msteams-bridge": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
