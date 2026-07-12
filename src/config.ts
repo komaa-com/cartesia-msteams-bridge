@@ -161,6 +161,17 @@ export function loadConfig(): BridgeConfig {
   if (cfg.hmacFreshnessMs === 0) {
     throw new Error("HMAC_FRESHNESS_MS must be positive (0 would reject every upgrade and disable replay protection)");
   }
+  // Access tokens are minted per call with the API's maximum lifetime (1 h)
+  // and the Line wire has no re-auth message. Whether Cartesia enforces expiry
+  // on an ESTABLISHED stream is not documented - warn rather than clamp, so an
+  // operator who sets a longer limit knows about the cliff.
+  if (cfg.maxCallMinutes > 55) {
+    log.warn(
+      "MAX_CALL_MINUTES exceeds the Cartesia access-token lifetime (1 h, not refreshable mid-stream): " +
+        "if Cartesia enforces expiry on established streams, calls die abruptly at ~60 min. " +
+        "Set MAX_CALL_MINUTES to 55 or less to end calls cleanly (with a goodbye) before the cliff.",
+    );
+  }
   // The Line wire has no injection message, so without a TTS config the
   // governor goodbye is best-effort (a goodbye_request custom event the agent
   // code may or may not handle). Not an error - but the operator should know

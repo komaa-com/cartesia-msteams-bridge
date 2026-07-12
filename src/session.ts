@@ -211,7 +211,8 @@ export class CallSession {
         this.sendToWorker({ type: "pong", ts: msg.ts });
         break;
       case "participants":
-        if (typeof msg.count !== "number") {
+        // a zero/negative count is junk - "1:1 call" would be a lie
+        if (typeof msg.count !== "number" || msg.count < 1) {
           break;
         }
         this.participantCount = msg.count;
@@ -229,12 +230,15 @@ export class CallSession {
           this.line.sendDtmf(msg.digit);
         }
         break;
-      case "recording.status":
-        this.recordingActive = msg.status === "active";
-        this.recordingStatus = msg.status;
-        this.log.info(`recording.status = ${msg.status}`);
-        this.pushContext({ note: `Teams recording is now ${msg.status}.`, recordingStatus: msg.status });
+      case "recording.status": {
+        // a missing/non-string field must not become the literal "undefined"
+        const status = typeof msg.status === "string" && msg.status ? msg.status : "unknown";
+        this.recordingActive = status === "active";
+        this.recordingStatus = status;
+        this.log.info(`recording.status = ${status}`);
+        this.pushContext({ note: `Teams recording is now ${status}.`, recordingStatus: status });
         break;
+      }
       case "video.frame":
         // The Line wire is audio-only and has no tool channel back to the
         // bridge, so there is no vision path - frames are dropped, not buffered.
@@ -453,6 +457,15 @@ export class CallSession {
       this.log.warn(
         `Cartesia error event: ${err.error_code ?? err.status_code ?? "unknown"}: ${err.message ?? err.title ?? "no detail"}`,
       );
+      // An error BEFORE the ack means the stream never came up (bad agent
+      // config, quota, rejected start) - fail the call NOW with the real
+      // reason instead of leaving the caller in silence until the 10 s ack
+      // timeout. Post-ack errors stay advisory: the socket close is the
+      // authoritative fatal signal, and killing a live call on a recoverable
+      // error would be worse than the error itself.
+      if (!this.acked) {
+        this.endCall("agent-error");
+      }
       return;
     }
     const event = (msg as { event?: string }).event;

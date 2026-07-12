@@ -15,7 +15,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 EXPOSE 8080
-# healthcheck against the bridge's /healthz endpoint
+# healthcheck against the bridge's /healthz endpoint. Assumes plain WS: with
+# TLS_CERT_PATH/TLS_KEY_PATH set the server speaks HTTPS on this port and this
+# plain-HTTP probe FAILS - override or disable it when enabling native TLS.
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:${PORT:-8080}/healthz || exit 1
 USER node
 CMD ["node", "dist/cli.js"]

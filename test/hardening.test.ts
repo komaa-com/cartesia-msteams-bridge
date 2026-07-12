@@ -149,3 +149,32 @@ test("metricDec clamps gauges at zero", async () => {
   metricDec("bridge_calls_active");
   assert.match(renderMetrics(), /bridge_calls_active 0\n/);
 });
+
+test("ReplayGuard clamps future-dated timestamps to now", () => {
+  // isFresh accepts up to +window of clock skew; ts + window on top of that
+  // would keep the tuple replayable for up to 2x the window.
+  const g = new ReplayGuard(60_000);
+  const now = 1_000_000;
+  assert.equal(g.claim("c", now + 59_000, "s", now), true);
+  const later = now + 60_001; // just past now + window
+  assert.equal(g.claim("other", later, "s2", later), true);
+  assert.equal(g.size, 1, "future-dated record swept at now + window");
+});
+
+test("loadConfig warns when MAX_CALL_MINUTES exceeds the token lifetime", () => {
+  const saved = { ...process.env };
+  const warnings: string[] = [];
+  const origWarn = console.log;
+  console.log = (line: string) => warnings.push(String(line));
+  try {
+    process.env.WORKER_SHARED_SECRET = "s";
+    process.env.CARTESIA_API_KEY = "k";
+    process.env.CARTESIA_AGENT_ID = "a";
+    process.env.MAX_CALL_MINUTES = "90";
+    loadConfig();
+    assert.ok(warnings.some((w) => w.includes("access-token lifetime")));
+  } finally {
+    console.log = origWarn;
+    process.env = saved;
+  }
+});

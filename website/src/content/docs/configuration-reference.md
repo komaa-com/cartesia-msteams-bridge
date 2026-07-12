@@ -42,6 +42,8 @@ Your Line agent's own deployment config is the default; these override per call:
 
 Without a TTS model + voice, the governor goodbye is a `custom` `{type: "goodbye_request"}` event your Line agent code may speak - silent otherwise. Arming `MAX_CALL_MINUTES` without TTS logs a startup warning for exactly this reason. See [Your Line Agent](/cartesia-msteams-bridge/your-line-agent/).
 
+Keep `MAX_CALL_MINUTES` at 55 or less: the per-call access token is minted with the API's maximum lifetime (1 hour) and the wire has no re-auth message, so if Cartesia enforces expiry on established streams, longer calls die abruptly at ~60 minutes. The bridge warns at startup when the limit exceeds that.
+
 ## Server and transport
 
 | Env | Default | Meaning |

@@ -452,3 +452,69 @@ test("embedder drain: server.drain() ends live calls gracefully without exiting"
   const ws2 = await connectWorker(p, "call-drain-2");
   ws2.close();
 });
+
+test("a Cartesia error before the ack fails the call fast; after the ack it is advisory", async () => {
+  const fake = new FakeAgent();
+  const s = startServer({ ...cfg }, makeConnector(fake));
+  await new Promise<void>((r) => s.once("listening", () => r()));
+  const p = (s.address() as AddressInfo).port;
+  after(() => s.close());
+
+  const callId = "call-preack-err";
+  const ws = await connectWorker(p, callId);
+  const received: Array<Record<string, unknown>> = [];
+  ws.on("message", (d) => received.push(JSON.parse(d.toString())));
+  ws.send(JSON.stringify({ type: "session.start", callId, threadId: "t", caller: {} }));
+  await until(() => fake.sent.find((m) => m.event === "start"));
+  // error BEFORE ack: the stream never came up - fail now, not at the 10s timeout
+  fake.emit({ type: "error", status_code: 404, message: "agent not found" } as LineInbound);
+  const end = await until(() => received.find((m) => m.type === "session.end"));
+  assert.equal(end.reason, "agent-error");
+
+  // post-ack error is advisory: the call survives
+  const fake2 = new FakeAgent();
+  const s2 = startServer({ ...cfg }, makeConnector(fake2));
+  await new Promise<void>((r) => s2.once("listening", () => r()));
+  const p2 = (s2.address() as AddressInfo).port;
+  after(() => s2.close());
+  const ws2 = await connectWorker(p2, "call-postack-err");
+  ws2.send(JSON.stringify({ type: "session.start", callId: "call-postack-err", threadId: "t", caller: {} }));
+  await until(() => fake2.sent.find((m) => m.event === "start"));
+  fake2.emit({ event: "ack" });
+  fake2.emit({ type: "error", status_code: 429, message: "transient" } as LineInbound);
+  ws2.send(JSON.stringify({ type: "ping", ts: 1 }));
+  const received2: Array<Record<string, unknown>> = [];
+  ws2.on("message", (d) => received2.push(JSON.parse(d.toString())));
+  await until(() => received2.find((m) => m.type === "pong"));
+  ws2.close();
+});
+
+test("junk recording.status and zero participants are sanitized, not relayed", async () => {
+  const fake = new FakeAgent();
+  const s = startServer({ ...cfg }, makeConnector(fake));
+  await new Promise<void>((r) => s.once("listening", () => r()));
+  const p = (s.address() as AddressInfo).port;
+  after(() => s.close());
+
+  const callId = "call-sanitize-1";
+  const ws = await connectWorker(p, callId);
+  ws.send(JSON.stringify({ type: "session.start", callId, threadId: "t", caller: {} }));
+  await until(() => fake.sent.find((m) => m.event === "start"));
+  fake.emit({ event: "ack" });
+
+  ws.send(JSON.stringify({ type: "recording.status" })); // no status field
+  ws.send(JSON.stringify({ type: "participants", count: 0 }));
+  ws.send(JSON.stringify({ type: "ping", ts: 9 }));
+  const received: Array<Record<string, unknown>> = [];
+  ws.on("message", (d) => received.push(JSON.parse(d.toString())));
+  await until(() => received.find((m) => m.type === "pong"));
+
+  const contexts = fake.sent
+    .filter((m) => m.event === "custom")
+    .map((m) => m.metadata as Record<string, unknown>)
+    .filter((md) => md.type === "call_context");
+  assert.ok(contexts.every((md) => md.recordingStatus !== "undefined"), "no literal 'undefined' status");
+  assert.ok(contexts.some((md) => md.recordingStatus === "unknown"), "missing status becomes 'unknown'");
+  assert.ok(contexts.every((md) => md.participantCount !== 0), "zero participant count dropped");
+  ws.close();
+});

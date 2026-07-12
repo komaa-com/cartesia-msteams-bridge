@@ -75,8 +75,11 @@ export class ReplayGuard {
       return false;
     }
     // Expire when the timestamp stops being fresh, not "now + window": the tuple
-    // is unusable past ts + windowMs anyway (isFresh would reject it).
-    this.seen.set(key, ts + this.windowMs);
+    // is unusable past ts + windowMs anyway (isFresh would reject it). Clamp
+    // future-dated timestamps to now - isFresh accepts up to +window of clock
+    // skew, and ts + window on top of that would keep the tuple replayable for
+    // up to 2x the window.
+    this.seen.set(key, Math.min(ts, nowMs) + this.windowMs);
     return true;
   }
 

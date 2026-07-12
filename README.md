@@ -204,7 +204,9 @@ With `CARTESIA_TTS_MODEL` + a voice id the goodbye is deterministic: the exact t
 
 ## Disconnects and reconnects
 
-If the worker socket drops mid-call, the bridge tears the call down: the Line stream is closed and the `callId` is freed. There is **no mid-call re-attach**: a StandIn retry with the same `callId` after teardown is a fresh call with a fresh agent stream and no conversation memory; a retry arriving while the old session is still live is rejected with `409` so one call can never pay for two agent streams. If the Cartesia socket drops instead (including your agent code ending the call), the bridge ends the Teams call with `session.end(agent-disconnected)`. A silent dead peer is detected after 90 s (3 missed worker heartbeats) and the billed stream is closed.
+If the worker socket drops mid-call, the bridge tears the call down: the Line stream is closed and the `callId` is freed. There is **no mid-call re-attach**: a StandIn retry with the same `callId` after teardown is a fresh call with a fresh agent stream and no conversation memory; a retry arriving while the old session is still live is rejected with `409` so one call can never pay for two agent streams. If the Cartesia socket drops instead (including your agent code ending the call), the bridge ends the Teams call with `session.end(agent-disconnected)` - there is **no mid-call reconnect to Cartesia** either: the connect path retries once at call start, but a steady-state Line blip ends the Teams call. A silent dead peer is detected after 90 s (3 missed worker heartbeats) and the billed stream is closed.
+
+One operational note: the per-call access token is minted with the API's maximum lifetime (1 hour) and the wire has no re-auth message. Whether Cartesia enforces expiry on established streams is not documented; set `MAX_CALL_MINUTES` to 55 or less to end long calls cleanly before that cliff (the bridge warns at startup otherwise).
 
 ## Privacy
 

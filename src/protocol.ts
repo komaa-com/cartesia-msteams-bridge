@@ -33,6 +33,10 @@ export interface RecordingStatusMessage {
 export interface AudioFrameMessage {
   type: "audio.frame";
   seq: number;
+  /** MEDIA-TIMELINE offset: 0 for the stream's first frame, advancing by exact
+   *  PCM duration - NOT wall-clock/epoch time. This is the contract every
+   *  sibling bridge speaks (live-tested against the worker); the worker paces
+   *  playback itself. */
   timestampMs: number;
   /** Base64 PCM16K (16 kHz, 16-bit, mono, little-endian). */
   payloadBase64: string;
