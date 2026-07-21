@@ -9,6 +9,8 @@
 
 **`@komaa/cartesia-msteams-bridge`** puts a [Cartesia Line](https://docs.cartesia.ai/line) voice agent on a real **Microsoft Teams call**.
 
+> **Prefer Python?** The same bridge exists as a Python package: [`cartesia-msteams-bridge` on PyPI](https://pypi.org/project/cartesia-msteams-bridge/) ([repo](https://github.com/komaa-com/cartesia-msteams-bridge-py)) - same wire protocol, same environment variables, drop-in interchangeable behind the same `.env` file. The Node and Python packages version independently; both implement the same StandIn wire protocol and interoperate with the hosted service identically.
+
 The hosted **StandIn media bridge** ([standin.komaa.com](https://standin.komaa.com)) joins the Teams call and dials into this bridge over an HMAC-authenticated WebSocket; the bridge opens one Line agent stream per call (via Cartesia's [WebSocket API](https://docs.cartesia.ai/line/integrations/websocket-api), the integration Cartesia provides for bringing your own telephony) and relays between them.
 
 ```text
