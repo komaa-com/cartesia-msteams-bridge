@@ -1,6 +1,6 @@
 {
   "name": "@komaa/cartesia-msteams-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Put a Cartesia Line voice agent on Microsoft Teams calls. Terminates the StandIn media bridge wire protocol on one side and the Cartesia Line agent WebSocket on the other. No transcoding: the base64 PCM 16k payload is relayed verbatim both ways, barge-in via clear, native DTMF, live-context custom events, call governors with a Sonic TTS goodbye.",
   "keywords": [
     "cartesia",
