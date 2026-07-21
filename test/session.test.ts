@@ -1,6 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import WebSocket from "ws";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 import { startServer } from "../src/server.js";
 import { sign } from "../src/hmac.js";
@@ -517,4 +518,52 @@ test("junk recording.status and zero participants are sanitized, not relayed", a
   assert.ok(contexts.some((md) => md.recordingStatus === "unknown"), "missing status becomes 'unknown'");
   assert.ok(contexts.every((md) => md.participantCount !== 0), "zero participant count dropped");
   ws.close();
+});
+
+// ---------------------------------------------------------------------------
+// Upgrade-path lifecycle: an abrupt peer disconnect mid-handshake must be
+// absorbed quietly, and the server must keep answering afterwards.
+// ---------------------------------------------------------------------------
+test("upgrade: abrupt peer disconnect during reject is tolerated; server stays live", async () => {
+  const srv = startServer({ ...cfg });
+  await new Promise<void>((r) => srv.once("listening", () => r()));
+  const p = (srv.address() as AddressInfo).port;
+
+  const RAW_UPGRADE =
+    "GET /voice/msteams/stream/call-tidy HTTP/1.1\r\n" +
+    "Host: 127.0.0.1\r\n" +
+    "Connection: Upgrade\r\n" +
+    "Upgrade: websocket\r\n" +
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+    "Sec-WebSocket-Version: 13\r\n\r\n";
+
+  // Unauthenticated upgrade, then drop the socket immediately: the reject write
+  // races the closed socket and must be absorbed.
+  await new Promise<void>((resolve) => {
+    const s = net.connect(p, "127.0.0.1", () => {
+      s.write(RAW_UPGRADE, () => {
+        s.destroy();
+        resolve();
+      });
+    });
+    s.on("error", () => resolve());
+  });
+  await new Promise<void>((r) => setTimeout(r, 100));
+
+  // Liveness: the same request, read to completion, still gets the 401 reject.
+  const reply = await new Promise<string>((resolve) => {
+    let buf = "";
+    const s = net.connect(p, "127.0.0.1", () => s.write(RAW_UPGRADE));
+    s.on("data", (d) => {
+      buf += d.toString();
+    });
+    s.on("close", () => resolve(buf));
+    s.on("error", () => resolve(buf));
+    setTimeout(() => {
+      s.destroy();
+      resolve(buf);
+    }, 1500);
+  });
+  assert.match(reply, /401/);
+  srv.close();
 });
