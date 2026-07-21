@@ -311,11 +311,20 @@ export function startServer(
 
   const reject = (socket: Duplex, status: string, reason: string, ip: string): void => {
     log.warn(`rejected upgrade from ${ip}: ${reason}`);
-    socket.write(`HTTP/1.1 ${status}\r\n\r\n`);
+    // The peer may already be gone; only write while the socket is alive.
+    if (!socket.destroyed) {
+      socket.write(`HTTP/1.1 ${status}\r\n\r\n`);
+    }
     socket.destroy();
   };
 
   httpServer.on("upgrade", (req, socket, head) => {
+    // A peer can drop the connection at any moment in the window before the
+    // WebSocket exists; give the raw socket an error handler so that stays tidy
+    // (the reject write below also skips sockets that are already gone).
+    socket.on("error", () => {
+      socket.destroy();
+    });
     const ip = remoteKey(req, cfg.trustProxy);
     // Defense in depth: any throw in this listener is an uncaught exception that
     // kills the process (callIdFromUrl is guarded, but never rely on one guard).
